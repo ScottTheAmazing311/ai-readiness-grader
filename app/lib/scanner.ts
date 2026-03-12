@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import { crawlSite, type CrawlResult } from './cloudflare-crawl';
 
 // ═══════════════════════════════════════════════════════════
 // TYPES
@@ -39,6 +40,8 @@ export interface ScanResult {
   scanDurationMs: number;
   pagesScanned: number;
   errors: string[];
+  crawlEnhanced: boolean;
+  crawlPagesUsed: number;
 }
 
 interface FetchedResource {
@@ -262,10 +265,10 @@ function discoverSubpages(homepage: ParsedPage, baseUrl: string): { practiceArea
 // SCORING ENGINE
 // ═══════════════════════════════════════════════════════════
 function gradeFromScore(score: number): { grade: string; label: string } {
-  if (score >= 90) return { grade: 'A+', label: 'AI-Ready Leader' };
-  if (score >= 75) return { grade: 'A', label: 'Strong Foundation' };
-  if (score >= 60) return { grade: 'B', label: 'Needs Improvement' };
-  if (score >= 40) return { grade: 'C', label: 'Significant Gaps' };
+  if (score >= 85) return { grade: 'A+', label: 'AI-Ready Leader' };
+  if (score >= 70) return { grade: 'A', label: 'Strong Foundation' };
+  if (score >= 55) return { grade: 'B', label: 'Needs Improvement' };
+  if (score >= 35) return { grade: 'C', label: 'Significant Gaps' };
   return { grade: 'F', label: 'Invisible to AI' };
 }
 
@@ -275,11 +278,11 @@ function gradeFromScore(score: number): { grade: string; label: string } {
 
 // ── 1. AI Discoverability (30 points) ──
 function checkRobotsTxt(robotsTxt: FetchedResource): CheckResult {
-  const maxPoints = 8;
+  const maxPoints = 10;
   if (!robotsTxt.content || robotsTxt.status !== 200) {
     return {
       name: 'robots.txt AI Policy', category: 'discoverability', passed: false,
-      score: 2, maxPoints,
+      score: 6, maxPoints,
       detail: 'No robots.txt found. AI crawlers have no explicit guidance for your site.',
       techDetail: 'Create a robots.txt file at your domain root. Ensure GPTBot, ClaudeBot, and PerplexityBot are not disallowed.'
     };
@@ -481,7 +484,7 @@ function checkHeadingHierarchy(page: ParsedPage): CheckResult {
 
 // ── 2. Content Clarity for AI (25 points) ──
 function checkFirmIdentity(page: ParsedPage): CheckResult {
-  const maxPoints = 7;
+  const maxPoints = 8;
   const text = (page.bodyText + ' ' + page.title + ' ' + page.metaDescription).toLowerCase();
   const first500 = text.slice(0, 2000).toLowerCase();
 
@@ -644,7 +647,7 @@ function checkServiceArea(page: ParsedPage): CheckResult {
 
 // ── 3. Structured Data & Schema (25 points) ──
 function checkLegalSchema(pages: ParsedPage[]): CheckResult {
-  const maxPoints = 8;
+  const maxPoints = 10;
   const allJsonLd = pages.flatMap(p => p.jsonLd);
 
   const legalTypes = ['Attorney', 'LegalService', 'LocalBusiness', 'LawFirm', 'ProfessionalService', 'Organization'];
@@ -905,7 +908,7 @@ function checkMobileViewport(page: ParsedPage): CheckResult {
 
 // ── 5. Advanced AI Signals (10 points) ──
 function checkLlmsTxt(llmsTxt: FetchedResource): CheckResult {
-  const maxPoints = 4;
+  const maxPoints = 2;
   if (llmsTxt.content && llmsTxt.status === 200 && llmsTxt.content.trim().length > 10) {
     return {
       name: 'llms.txt', category: 'advancedSignals', passed: true,
@@ -923,7 +926,7 @@ function checkLlmsTxt(llmsTxt: FetchedResource): CheckResult {
 }
 
 function checkMarkdownNegotiation(markdownResource: FetchedResource): CheckResult {
-  const maxPoints = 3;
+  const maxPoints = 2;
   if (markdownResource.content && markdownResource.status === 200) {
     const contentType = markdownResource.headers['content-type'] || '';
     if (contentType.includes('text/markdown') || contentType.includes('text/plain')) {
@@ -944,7 +947,7 @@ function checkMarkdownNegotiation(markdownResource: FetchedResource): CheckResul
 }
 
 function checkContentSignalHeader(homepageResource: FetchedResource): CheckResult {
-  const maxPoints = 3;
+  const maxPoints = 1;
   const headers = homepageResource.headers;
   const hasContentSignal = !!headers['content-signal'] || !!headers['x-robots-tag'];
 
@@ -977,24 +980,42 @@ export async function scanWebsite(inputUrl: string): Promise<ScanResult> {
   const origin = new URL(url).origin;
   const domain = new URL(url).hostname;
 
-  // ── Parallel fetch: homepage, robots.txt, sitemap, llms.txt, markdown ──
-  const [homepageRes, robotsRes, sitemapRes, llmsRes, markdownRes] = await Promise.all([
+  // ── Parallel fetch: homepage, robots.txt, sitemap, llms.txt, markdown, crawl ──
+  const [homepageRes, robotsRes, sitemapRes, llmsRes, markdownRes, crawlOutcome] = await Promise.all([
     fetchResource(url),
     fetchResource(origin + '/robots.txt', 5000),
     fetchResource(origin + '/sitemap.xml', 5000),
     fetchResource(origin + '/llms.txt', 5000),
     fetchResource(url, 5000, { 'Accept': 'text/markdown' }),
+    crawlSite({ url, limit: 75, maxDepth: 3, formats: ['html'] }).catch(() => null),
   ]);
 
-  if (!homepageRes.content || homepageRes.status !== 200) {
+  const crawlResult: CrawlResult | null = crawlOutcome ?? null;
+  let usedCrawl = false;
+
+  // Try standard homepage first; fall back to crawl if fetch failed
+  let homepageContent = homepageRes.content;
+  if ((!homepageContent || homepageRes.status !== 200) && crawlResult) {
+    const crawlHome = crawlResult.pages.find(p => {
+      if (p.status !== 'completed' || !p.html) return false;
+      try { return new URL(p.url).pathname === '/' || new URL(p.url).pathname === ''; } catch { return false; }
+    });
+    if (crawlHome?.html) {
+      homepageContent = crawlHome.html;
+      usedCrawl = true;
+    }
+  }
+
+  if (!homepageContent) {
     errors.push('Could not fetch homepage');
   }
 
   // Parse homepage
-  const homepage = homepageRes.content ? parsePage(homepageRes.content, url) : null;
+  const homepage = homepageContent ? parsePage(homepageContent, url) : null;
 
   // ── Discover and fetch subpages ──
   const allPages: ParsedPage[] = homepage ? [homepage] : [];
+  const seenUrls = new Set<string>([url]);
 
   if (homepage) {
     const subpageUrls = discoverSubpages(homepage, url);
@@ -1013,7 +1034,28 @@ export async function scanWebsite(inputUrl: string): Promise<ScanResult> {
     for (const result of subResults) {
       if (result.status === 'fulfilled' && result.value) {
         allPages.push(result.value);
+        seenUrls.add(result.value.url);
       }
+    }
+  }
+
+  // Merge additional crawl pages (captures JS-rendered structured data)
+  if (crawlResult) {
+    for (const crawlPage of crawlResult.pages) {
+      if (crawlPage.status !== 'completed' || !crawlPage.html) continue;
+      if (seenUrls.has(crawlPage.url)) continue;
+      try {
+        const pageUrl = new URL(crawlPage.url);
+        if (pageUrl.hostname !== domain) continue;
+        const path = pageUrl.pathname.toLowerCase();
+        const isRelevant = /\/(about|attorney|lawyer|practice|blog|faq|contact|team|people|service)/.test(path);
+        if (!isRelevant && allPages.length >= 10) continue;
+        const parsed = parsePage(crawlPage.html, crawlPage.url);
+        allPages.push(parsed);
+        seenUrls.add(crawlPage.url);
+        usedCrawl = true;
+        if (allPages.length >= 15) break;
+      } catch { /* skip */ }
     }
   }
 
@@ -1103,5 +1145,7 @@ export async function scanWebsite(inputUrl: string): Promise<ScanResult> {
     scanDurationMs: Date.now() - startTime,
     pagesScanned: allPages.length,
     errors,
+    crawlEnhanced: usedCrawl,
+    crawlPagesUsed: usedCrawl ? allPages.length : 0,
   };
 }
