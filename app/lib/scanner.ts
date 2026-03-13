@@ -987,7 +987,10 @@ export async function scanWebsite(inputUrl: string): Promise<ScanResult> {
     fetchResource(origin + '/sitemap.xml', 5000),
     fetchResource(origin + '/llms.txt', 5000),
     fetchResource(url, 5000, { 'Accept': 'text/markdown' }),
-    crawlSite({ url, limit: 75, maxDepth: 3, formats: ['html'], maxAge: 3600 }).catch(() => null),
+    Promise.race([
+      crawlSite({ url, limit: 30, maxDepth: 2, formats: ['html'], maxAge: 3600 }),
+      new Promise<null>(resolve => setTimeout(() => resolve(null), 90000)),
+    ]).catch(() => null),
   ]);
 
   const crawlResult: CrawlResult | null = crawlOutcome ?? null;
