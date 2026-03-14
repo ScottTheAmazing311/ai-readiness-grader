@@ -163,10 +163,10 @@ export default function Home() {
       </div>
 
       <header>
-        <div className="logo">
+        <a className="logo" href="https://lawfirmaudits.com" style={{textDecoration:'none',color:'inherit'}}>
           <div className="logo-mark"></div>
           <div className="logo-text">AI Readiness Grader</div>
-        </div>
+        </a>
         <a href="https://lawfirmaudits.com" className="header-tag" style={{textDecoration:'none',color:'inherit'}}>LawFirmAudits.com</a>
       </header>
 
