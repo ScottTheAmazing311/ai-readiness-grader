@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { encodeResults } from './lib/share';
 
 // ═══════════════════════════════════════════════════════════
 // TYPES
 // ═══════════════════════════════════════════════════════════
-interface CheckResult {
+export interface CheckResult {
   name: string;
   category: string;
   passed: boolean;
@@ -15,7 +16,7 @@ interface CheckResult {
   techDetail: string;
 }
 
-interface CategoryScore {
+export interface CategoryScore {
   name: string;
   score: number;
   maxPoints: number;
@@ -23,7 +24,7 @@ interface CategoryScore {
   checks: CheckResult[];
 }
 
-interface ScanResult {
+export interface ScanResult {
   url: string;
   domain: string;
   overallScore: number;
@@ -48,7 +49,7 @@ type ViewState = 'input' | 'loading' | 'results';
 // ═══════════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════════
-function getScoreClass(score: number): string {
+export function getScoreClass(score: number): string {
   if (score >= 81) return 'excellent';
   if (score >= 70) return 'good';
   if (score >= 60) return 'average';
@@ -56,13 +57,13 @@ function getScoreClass(score: number): string {
   return 'poor';
 }
 
-function getCheckStatus(check: CheckResult): string {
+export function getCheckStatus(check: CheckResult): string {
   if (check.passed) return 'pass';
   if (check.score > 0) return 'partial';
   return 'fail';
 }
 
-function getCheckStatusLabel(check: CheckResult): string {
+export function getCheckStatusLabel(check: CheckResult): string {
   if (check.passed) return 'Pass';
   if (check.score > 0) return 'Partial';
   return 'Fail';
@@ -274,9 +275,19 @@ export default function Home() {
 // ═══════════════════════════════════════════════════════════
 // RESULTS COMPONENT
 // ═══════════════════════════════════════════════════════════
-function ResultsSection({ result, onReset }: { result: ScanResult; onReset: () => void }) {
+export function ResultsSection({ result, onReset, isShared }: { result: ScanResult; onReset?: () => void; isShared?: boolean }) {
   const overall = result.overallScore;
   const scoreClass = getScoreClass(overall);
+
+  const [shareMsg, setShareMsg] = useState('');
+  const handleShare = () => {
+    const encoded = encodeResults(result);
+    const shareUrl = `${window.location.origin}/share#${encoded}`;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      setShareMsg('Link Copied!');
+      setTimeout(() => setShareMsg(''), 2000);
+    });
+  };
 
   const categoryOrder: (keyof typeof result.categories)[] = [
     'discoverability', 'contentClarity', 'structuredData', 'technicalAccessibility', 'advancedSignals'
@@ -360,6 +371,24 @@ function ResultsSection({ result, onReset }: { result: ScanResult; onReset: () =
         </div>
       </div>
 
+      {/* SHARE BUTTON */}
+      {!isShared && (
+        <div className="share-btn-wrap">
+          <button className="share-btn" onClick={handleShare}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+            </svg>
+            {shareMsg || 'Share Results'}
+          </button>
+        </div>
+      )}
+
+      {/* SHARED BANNER */}
+      {isShared && (
+        <div className="shared-banner">Shared results — <a href="/">Run your own audit</a></div>
+      )}
+
       {/* STRENGTH + GAP */}
       <div className="summary-grid">
         <div className="summary-card" style={{ border: '1px solid rgba(45, 122, 82, 0.15)' }}>
@@ -417,35 +446,52 @@ function ResultsSection({ result, onReset }: { result: ScanResult; onReset: () =
       <div className="section-divider"></div>
 
       {/* CTA */}
-      <div className="cta-section">
-        <div className="cta-eyebrow">Want to fix these gaps?</div>
-        <div className="cta-title">Turn your score into<br /><em style={{ fontStyle: 'italic' }}>an action plan.</em></div>
-        <div className="cta-sub">
-          Your AI Readiness Score shows where you stand. Rankings.io can help you fix every gap — from structured data to llms.txt — so AI starts recommending your firm.
+      {!isShared ? (
+        <div className="cta-section">
+          <div className="cta-eyebrow">Want to fix these gaps?</div>
+          <div className="cta-title">Turn your score into<br /><em style={{ fontStyle: 'italic' }}>an action plan.</em></div>
+          <div className="cta-sub">
+            Your AI Readiness Score shows where you stand. Rankings.io can help you fix every gap — from structured data to llms.txt — so AI starts recommending your firm.
+          </div>
+          <div className="cta-buttons">
+            <a
+              href={`mailto:scottknudson@rankings.io?subject=AI Readiness Audit — ${encodeURIComponent(result.domain)}&body=I just ran my AI Readiness Score on ${encodeURIComponent(result.url)} and scored ${overall}/100 (${result.grade}). I'd like help improving my firm's AI visibility.`}
+              className="cta-btn-primary"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.8 19.79 19.79 0 01.03 1.16 2 2 0 012 0h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L6.09 7.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 14.92v2z" />
+              </svg>
+              Get Help Fixing These
+            </a>
+            <button className="cta-btn-secondary" onClick={onReset}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M1 4v6h6M23 20v-6h-6M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15" />
+              </svg>
+              Scan Another Firm
+            </button>
+          </div>
         </div>
-        <div className="cta-buttons">
-          <a
-            href={`mailto:scottknudson@rankings.io?subject=AI Readiness Audit — ${encodeURIComponent(result.domain)}&body=I just ran my AI Readiness Score on ${encodeURIComponent(result.url)} and scored ${overall}/100 (${result.grade}). I'd like help improving my firm's AI visibility.`}
-            className="cta-btn-primary"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.8 19.79 19.79 0 01.03 1.16 2 2 0 012 0h3a2 2 0 012 1.72 12.84 12.84 0 00.7 2.81 2 2 0 01-.45 2.11L6.09 7.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7A2 2 0 0122 14.92v2z" />
-            </svg>
-            Get Help Fixing These
-          </a>
-          <button className="cta-btn-secondary" onClick={onReset}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M1 4v6h6M23 20v-6h-6M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15" />
-            </svg>
-            Scan Another Firm
-          </button>
+      ) : (
+        <div className="cta-section">
+          <div className="cta-title">See how your firm scores.</div>
+          <div className="cta-sub">Run your own AI Readiness audit — free, instant, no login required.</div>
+          <div className="cta-buttons">
+            <a href="/" className="cta-btn-primary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M5 12h14M12 5l7 7-7 7" />
+              </svg>
+              Run Your Own Audit
+            </a>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* SCORE AGAIN */}
-      <div className="score-again">
-        <button className="score-again-btn" onClick={onReset}>&larr; Scan Another Firm</button>
-      </div>
+      {!isShared && (
+        <div className="score-again">
+          <button className="score-again-btn" onClick={onReset}>&larr; Scan Another Firm</button>
+        </div>
+      )}
     </div>
   );
 }
